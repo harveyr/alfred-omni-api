@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import datetime
 from functools import partial
 
@@ -83,6 +84,73 @@ class Config(object):
 config = Config()
 
 
+class ListHandler(object):
+    """
+    The new way of fetching and displaying lists. Converting over to this.
+    """
+
+    def __init__(
+        self,
+        query='',
+        cache_timeout=60 * 10
+    ):
+        self.workflow = Workflow()
+        self.query = query
+        self.cache_timeout = cache_timeout
+
+    @property
+    def cache_key(self):
+        return self.__class__.__name__
+
+    def run(self):
+        result = self.workflow.run(self._run)
+        self.workflow.send_feedback()
+        sys.exit(result)
+
+    def fetch(self):
+        raise NotImplementedError
+
+    def _run(self, workflow):
+        items = workflow.cached_data(
+            self.cache_key,
+            self.fetch,
+            self.cache_timeout
+        )
+
+        if self.query:
+            items = self.filtered_items(items, self.query)
+
+        for item in items:
+            self.add_item(item)
+
+    def add_item(self, item):
+        raise NotImplementedError
+
+    def filtered_items(self, items, query):
+        return self.workflow.filter(
+            query,
+            items,
+            key=lambda x: str(x)
+        )
+
+
+def throttled(func):
+    def inner(*args, **kwargs):
+        key = 'called_{}'.format(func.__name__)
+        val = config.get(key)
+
+        time.sleep(1)
+
+        if val and config.get(key) != val:
+            return None
+
+        config.set(**{key: time.time()})
+
+        return func(*args, **kwargs)
+
+    return inner
+
+
 def age_str(delta):
     total_seconds = int(delta.total_seconds())
 
@@ -147,18 +215,18 @@ def get_trello_client(wf):
     )
 
 
-def add_jira_issues(wf, issues):
-    for issue in issues:
-        title = '{}: {}'.format(issue.key, issue.summary)
-        age = 'Updated {}'.format(age_str(issue.updated_age))
+class JiraIssuesBaseHandler(ListHandler):
+    def add_item(self, item):
+        title = '{}: {}'.format(item.key, item.summary)
+        age = 'Updated {}'.format(age_str(item.updated_age))
         url_base = config.get(ConfigKeys.JIRA_URL)
 
         if url_base[-1] == '/':
             url_base = url_base[:-1]
 
-        browse_url = url_base + '/browse/' + issue.key
+        browse_url = url_base + '/browse/' + item.key
 
-        wf.add_item(
+        self.workflow.add_item(
             title,
             age,
             arg=browse_url,
@@ -166,118 +234,134 @@ def add_jira_issues(wf, issues):
             valid=True
         )
 
-
-def my_jira_issues(wf, query=None):
-    client = get_jira_client(wf)
-    issues = wf.cached_data('my_tix', client.get_users_issues, 60 * 5)
-
-    if query:
-        issues = wf.filter(
+    def filtered_items(self, items, query):
+        return self.workflow.filter(
             query,
-            issues,
+            items,
             key=lambda x: x.key + x.summary
         )
 
-    add_jira_issues(wf, issues)
-    wf.send_feedback()
+
+class JiraMyIssuesHandler(JiraIssuesBaseHandler):
+    def fetch(self):
+        client = get_jira_client(self.workflow)
+
+        return client.get_users_issues()
 
 
-def github_prs(repo, query, wf):
-    client = get_github_client(wf)
+class GithubRepoBaseHandler(ListHandler):
+    """
+    Handles Github lists that require a specific repo.
+    """
 
-    get_prs = partial(client.get_prs, repo)
-    prs = wf.cached_data(repo.replace('/', '_') + '_prs', get_prs, 60 * 5)
+    def __init__(self, repo, *args, **kwargs):
+        super(GithubRepoBaseHandler, self).__init__(*args, **kwargs)
 
-    if query:
-        prs = wf.filter(
+        if not repo:
+            raise ValueError('A repo is required. Got {}'.format(repo))
+
+        self.repo = repo
+        self.client = get_github_client(self.workflow)
+
+    @property
+    def cache_key(self):
+        return '_'.join([self.__class__.__name__] + self.repo.split('/'))
+
+
+class GithubPrsHandler(GithubRepoBaseHandler):
+
+    def fetch(self):
+        return self.client.get_prs(self.repo)
+
+    def filtered_items(self, items, query):
+        return self.workflow.filter(
             query,
-            prs,
+            items,
             key=lambda x: ' '.join([str(x.number), x.username, x.title])
         )
 
-    for pr in prs:
-        title = '{}: {}'.format(pr.number, pr.title)
-        age = datetime.datetime.now(TIMEZONE) - pr.updated
+    def add_item(self, item):
+        title = '{}: {}'.format(item.number, item.title)
+        age = datetime.datetime.now(TIMEZONE) - item.updated
 
-        subtitle = '[{}] Updated {}'.format(pr.username, age_str(age))
+        subtitle = '[{}] Updated {}'.format(item.username, age_str(age))
 
-        wf.add_item(
+        self.workflow.add_item(
             title,
             subtitle,
-            arg=pr.html_url,
+            arg=item.html_url,
             icon=ICON_WEB,
             valid=True
         )
 
-    wf.send_feedback()
 
+class GithubCommitsHandler(GithubRepoBaseHandler):
 
-def github_emoji(query, wf):
-    client = get_github_client(wf)
-    emoji_dict = wf.cached_data('github_emoji', client.get_emoji, 60 * 60 * 24)
+    def fetch(self):
+        return self.client.get_commits(self.repo)
 
-    emoji = [[k, v] for k, v in emoji_dict.items()]
+    def add_item(self, item):
+        age = datetime.datetime.now(TIMEZONE) - item.date
+        subtitle = '[{}] Updated {}'.format(item.username, age_str(age))
 
-    if query:
-        emoji = wf.filter(query, emoji, key=lambda x: x[0])
-
-    for e in emoji:
-        wf.add_item(
-            e[0],
-            e[1],
-            arg=e[1],
+        self.workflow.add_item(
+            item.commit_message,
+            subtitle,
+            arg=item.html_url,
+            icon=ICON_WEB,
             valid=True
         )
 
-    wf.send_feedback()
-
-
-def github_commits(repo, query, wf):
-    client = get_github_client(wf)
-
-    fetch = partial(client.get_commits, repo)
-
-    commits = wf.cached_data(repo.replace('/', '_') + '_commits', fetch, 60 * 5)
-
-    if query:
-        commits = wf.filter(
+    def filtered_items(self, items, query):
+        return self.workflow.filter(
             query,
-            commits,
+            items,
             key=lambda x: ' '.join([str(x.username), x.commit_message])
         )
 
-    for commit in commits:
-        age = datetime.datetime.now(TIMEZONE) - commit.date
-        subtitle = '[{}] Updated {}'.format(commit.username, age_str(age))
 
-        wf.add_item(
-            commit.commit_message,
-            subtitle,
-            arg=commit.html_url,
-            icon=ICON_WEB,
+class GithubEmojiHandler(ListHandler):
+    def fetch(self):
+        client = get_github_client(self.workflow)
+        result = client.get_emoji()
+
+        emoji_list = [[k, v] for k, v in result.items()]
+
+        return emoji_list
+
+    def add_item(self, item):
+        self.workflow.add_item(
+            item[0],
+            item[1],
+            arg=item[1],
             valid=True
         )
 
-    wf.send_feedback()
+    def filtered_items(self, items, query):
+        return self.workflow.filter(
+            query,
+            items,
+            key=lambda x: x[0]
+        )
 
 
-def jive_activity(query, wf):
-    client = get_jive_client(wf)
+class MyJiveActivityHandler(ListHandler):
+    def fetch(self):
+        client = get_jive_client(self.workflow)
 
-    items = wf.cached_data('my_jive_activities', client.get_activity, 60 * 5)
+        return client.get_activity()
 
-    if query:
-        items = wf.filter(
+    def filtered_items(self, items, query):
+        return self.workflow.filter(
             query,
             items,
             key=lambda x: ' '.join([x.actor_name, x.summary]),
         )
 
-    for item in items:
+    def add_item(self, item):
         if 'liked' in item.verb or 'task' in item.object_type:
-            continue
+            return
 
-        # age = datetime.datetime.now(TIMEZONE) - item.updated
         subtitle = '[{}:{}] {}: {}'.format(
             item.object_type,
             item.verb,
@@ -285,7 +369,7 @@ def jive_activity(query, wf):
             item.summary
         )
 
-        wf.add_item(
+        self.workflow.add_item(
             item.title,
             subtitle,
             arg=item.url,
@@ -293,30 +377,27 @@ def jive_activity(query, wf):
             valid=True
         )
 
-    wf.send_feedback()
 
+class HackpadsHandler(ListHandler):
+    def fetch(self):
+        client = get_hackpad_client(self.workflow)
 
-def all_hackpads(query, wf):
-    client = get_hackpad_client(wf)
+        return client.all_pads()
 
-    items = wf.cached_data('all_hackpads', client.all_pads, 60 * 5)
-
-    if query:
-        items = wf.filter(
+    def filtered_items(self, items, query):
+        return self.workflow.filter(
             query,
             items,
             key=lambda x: x.title,
         )
 
-    for item in items:
-        wf.add_item(
+    def add_item(self, item):
+        self.workflow.add_item(
             item.title,
             item.id,
             arg='https://hackpad.com/' + item.id,
             valid=True
         )
-
-    wf.send_feedback()
 
 
 def trello_me(wf):
@@ -325,37 +406,56 @@ def trello_me(wf):
     return wf.cached_data('trello_me', client.get_me, 60 * 10)
 
 
-def trello_boards(query, wf):
-    client = get_trello_client(wf)
+class TrelloBaseHandler(ListHandler):
+    @property
+    def client(self):
+        return TrelloClient(
+            self.workflow.get_password(AuthKeys.TRELLO_API_KEY),
+            self.workflow.get_password(AuthKeys.TRELLO_TOKEN)
+        )
 
-    member_id = config.get(ConfigKeys.TRELLO_MEMBER_ID)
+    def fetch_me(self):
+        return self.workflow.cached_data(
+            'trello_me',
+            self.client.get_me,
+            60 * 60
+        )
 
-    if not member_id:
-        me = trello_me(wf)
-        member_id = me.id
-        kwargs = {ConfigKeys.TRELLO_MEMBER_ID: member_id}
-        config.set(**kwargs)
+    def fetch_my_member_id(self):
+        member_id = config.get(ConfigKeys.TRELLO_MEMBER_ID)
 
-    fetch = partial(client.get_boards, member_id=member_id)
+        if not member_id:
+            me = self.fetch_me()
+            member_id = me.id
+            config.set(**{ConfigKeys.TRELLO_MEMBER_ID: member_id})
 
-    boards = wf.cached_data('trello_boards', fetch, 60 * 5)
+        return member_id
 
-    if query:
-        boards = wf.filter(
+
+class TrelloBoardsHandler(TrelloBaseHandler):
+
+    def fetch(self):
+        member_id = self.fetch_my_member_id()
+
+        if not member_id:
+            raise ValueError('Bad member id: {}'.format(member_id))
+
+        return self.client.get_boards(member_id)
+
+    def filtered_items(self, items, query):
+        return self.workflow.filter(
             query,
-            boards,
+            items,
             key=lambda x: x.name,
         )
 
-    for board in boards:
-        wf.add_item(
-            board.name,
-            board.id,
-            arg=board.short_url,
+    def add_item(self, item):
+        self.workflow.add_item(
+            item.name,
+            item.id,
+            arg=item.short_url,
             valid=True
         )
-
-    wf.send_feedback()
 
 
 def trello_create_card(query, wf):
@@ -367,77 +467,53 @@ def trello_create_card(query, wf):
     client.create_card(list_id, 'name', 'desc')
 
 
-def finish_workflow(wf, func):
-    if not func:
-        raise ValueError('I dunno!')
-
-    result = wf.run(func)
+def run_workflow(func):
+    result = Workflow().run(func)
     sys.exit(result)
 
 
 @click.group()
-@click.pass_context
-def cli(ctx):
-    ctx.obj = {
-        'workflow': Workflow(),
-    }
+def cli():
+    pass
 
 
 @cli.command()
 @click.option('--boards', is_flag=True)
 @click.option('--createcard', is_flag=True)
 @click.option('--query')
-@click.pass_context
-def trello(ctx, boards, createcard, query):
-    wf = ctx.obj['workflow']
-    func = None
-
+def trello(boards, createcard, query):
     if boards:
-        func = partial(trello_boards, query)
+        TrelloBoardsHandler().run()
     elif createcard:
-        func = partial(trello_create_card, query)
-
-    finish_workflow(wf, func)
+        run_workflow(partial(trello_create_card, query))
 
 
 @cli.command()
 @click.option('--activity', is_flag=True)
 @click.option('--query')
-@click.pass_context
-def jive(ctx, activity, query):
-    wf = ctx.obj['workflow']
-    func = None
+def jive(activity, query):
 
     if activity:
-        func = partial(jive_activity, query)
-
-    finish_workflow(wf, func)
+        MyJiveActivityHandler(
+            query,
+            cache_timeout=60 * 5
+        ).run()
 
 
 @cli.command()
 @click.option('--pads', is_flag=True)
 @click.option('--query')
-@click.pass_context
-def hackpad(ctx, pads, query):
-    wf = ctx.obj['workflow']
-    func = None
-
+def hackpad(pads, query):
     if pads:
-        func = partial(all_hackpads, query)
-
-    finish_workflow(wf, func)
+        HackpadsHandler(query=query).run()
 
 
 @cli.command()
 @click.option('--me', is_flag=True)
 @click.option('--query')
-@click.pass_context
-def jira(ctx, me, query):
-    wf = ctx.obj['workflow']
-
+def jira(me, query):
     if me:
-        func = lambda x: my_jira_issues(wf, query)
-        finish_workflow(wf, func)
+        JiraMyIssuesHandler(query=query).run()
 
 
 @cli.command()
@@ -446,24 +522,18 @@ def jira(ctx, me, query):
 @click.option('--commits', is_flag=True)
 @click.option('--emoji', is_flag=True)
 @click.option('--query')
-@click.pass_context
-def github(ctx, repo, prs, commits, emoji, query):
-    wf = ctx.obj['workflow']
-
-    func = None
-
+def github(repo, prs, commits, emoji, query):
     if prs:
-        func = partial(github_prs, repo, query)
+        GithubPrsHandler(repo, query=query).run()
     elif commits:
-        func = partial(github_commits, repo, query)
+        GithubCommitsHandler(repo, query=query).run()
     elif emoji:
-        func = partial(github_emoji, query)
-
-    if not func:
+        GithubEmojiHandler(
+            query=query,
+            cache_timeout=60 * 60 * 24
+        ).run()
+    else:
         raise ValueError('I dunno!')
-
-    finish_workflow(wf, func)
-
 
 if __name__ == '__main__':
     cli()
