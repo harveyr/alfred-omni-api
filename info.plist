@@ -113,7 +113,7 @@
 				<key>escaping</key>
 				<integer>127</integer>
 				<key>keyword</key>
-				<string>uajirame</string>
+				<string>jirame</string>
 				<key>runningsubtext</key>
 				<string>Searching...</string>
 				<key>script</key>
@@ -141,14 +141,14 @@ python alfred_omni_api.py jira --me --query='{query}'</string>
 				<key>escaping</key>
 				<integer>127</integer>
 				<key>keyword</key>
-				<string>uaprs</string>
+				<string>airprs</string>
 				<key>runningsubtext</key>
 				<string>Fetching...</string>
 				<key>script</key>
 				<string>source bin/activate
 python alfred_omni_api.py github --prs --repo='urbanairship/airship' --query='{query}'</string>
 				<key>subtext</key>
-				<string>Search Airship PRs</string>
+				<string>OmniAPI</string>
 				<key>title</key>
 				<string>Airship PRs</string>
 				<key>type</key>
@@ -171,7 +171,7 @@ python alfred_omni_api.py github --prs --repo='urbanairship/airship' --query='{q
 				<key>escaping</key>
 				<integer>127</integer>
 				<key>keyword</key>
-				<string>uacommits</string>
+				<string>aircommits</string>
 				<key>runningsubtext</key>
 				<string>Fetching...</string>
 				<key>script</key>
@@ -218,14 +218,16 @@ python alfred_omni_api.py github --commits --repo='urbanairship/airship' --query
 				<key>escaping</key>
 				<integer>127</integer>
 				<key>keyword</key>
-				<string>uajivea</string>
+				<string>jivea</string>
 				<key>runningsubtext</key>
 				<string>Fetching...</string>
 				<key>script</key>
 				<string>source bin/activate
 python alfred_omni_api.py jive --activity --query='{query}'</string>
+				<key>subtext</key>
+				<string>OmniAPI</string>
 				<key>title</key>
-				<string>Jive Activity</string>
+				<string>UA Jive Activity</string>
 				<key>type</key>
 				<integer>0</integer>
 				<key>withspace</key>
@@ -246,12 +248,14 @@ python alfred_omni_api.py jive --activity --query='{query}'</string>
 				<key>escaping</key>
 				<integer>127</integer>
 				<key>keyword</key>
-				<string>hacks</string>
+				<string>hackpads</string>
 				<key>runningsubtext</key>
 				<string>Fetching...</string>
 				<key>script</key>
 				<string>source bin/activate
 python alfred_omni_api.py hackpad --pads --query='{query}'</string>
+				<key>subtext</key>
+				<string>OmniAPI</string>
 				<key>title</key>
 				<string>Hackpads</string>
 				<key>type</key>
@@ -276,14 +280,14 @@ python alfred_omni_api.py hackpad --pads --query='{query}'</string>
 				<key>keyword</key>
 				<string>trelloboards</string>
 				<key>runningsubtext</key>
-				<string>fetching...</string>
+				<string>Fetching...</string>
 				<key>script</key>
 				<string>source bin/activate
 python alfred_omni_api.py trello --boards --query='{query}'</string>
 				<key>subtext</key>
-				<string>Yep</string>
+				<string>OmniAPI</string>
 				<key>title</key>
-				<string>Browse Trello Boards</string>
+				<string>Trello Boards</string>
 				<key>type</key>
 				<integer>0</integer>
 				<key>withspace</key>
@@ -304,7 +308,7 @@ python alfred_omni_api.py trello --boards --query='{query}'</string>
 				<key>keyword</key>
 				<string>trellocc</string>
 				<key>subtext</key>
-				<string>(OmniAPI)</string>
+				<string>OmniAPI</string>
 				<key>text</key>
 				<string>Trello: Create Card</string>
 				<key>withspace</key>
@@ -349,8 +353,10 @@ python alfred_omni_api.py trello --createcard --query='{query}'</string>
 				<key>script</key>
 				<string>source bin/activate
 python alfred_omni_api.py github --emoji --query='{query}'</string>
+				<key>subtext</key>
+				<string>OmniAPI</string>
 				<key>title</key>
-				<string>Search Emoji</string>
+				<string>Browse Github Emoji</string>
 				<key>type</key>
 				<integer>0</integer>
 				<key>withspace</key>
