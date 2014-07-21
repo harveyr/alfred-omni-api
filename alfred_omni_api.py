@@ -460,11 +460,8 @@ class TrelloBoardsHandler(TrelloBaseHandler):
 
 def trello_create_card(query, wf):
     list_id = config.get(ConfigKeys.TRELLO_LIST_ID, enforce=True)
-
     client = get_trello_client(wf)
-
-    wf.logger.debug('query: {}'.format(query))
-    client.create_card(list_id, 'name', 'desc')
+    client.create_card(list_id, query)
 
 
 def run_workflow(func):
