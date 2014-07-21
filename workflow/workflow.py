@@ -921,7 +921,7 @@ class Workflow(object):
         matter how old.
 
         :param name: name of datastore
-        :type name: ``unicode``
+        :type name: str
         :param data_func: function to (re-)generate data.
         :type data_func: `callable`
         :param max_age: maximum age of cached data in seconds
@@ -1298,7 +1298,7 @@ class Workflow(object):
         :param autocomplete: Text expanded in Alfred when item is TABbed
         :type autocomplete: ``unicode``
         :param valid: Whether or not item can be actioned
-        :type valid: `Boolean`
+        :type valid: ``bool``
         :param uid: Used by Alfred to remember/sort items
         :type uid: ``unicode``
         :param icon: Filename of icon to use
@@ -1380,12 +1380,12 @@ class Workflow(object):
 
         :param account: name of the account the password is for, e.g.
             "Pinboard"
-        :type account: ``unicode``
+        :type account: str
         :param service: Name of the service. By default, this is the workflow's
                         bundle ID
-        :type service: ``unicode``
+        :type service: str
         :returns: account password
-        :rtype: ``unicode``
+        :rtype: str
 
         """
 
